@@ -3,8 +3,9 @@
   "special_missions": [
     {
       "name": "Bracca SM (解鎖 Zeffo)",
-      "purpose": "需要 30 次成功清關才解鎖 bonus planet Zeffo（公會自訂：JKCK 必須有 Whirlwind Slam Omicron）",
+      "purpose": "需要 30 次成功清關才解鎖 Zeffo；公會目標：全員達標（含失敗率緩衝）。JKCK 必須有 Whirlwind Slam Omicron。",
       "min_successful_attempts": 30,
+      "guild_target": "all",
       "required_chars": [
         {
           "label": "Cere Junda",

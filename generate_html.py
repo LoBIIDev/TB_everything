@@ -151,14 +151,20 @@ def build_special_missions(special_missions, by_player):
         partial.sort(key=pkey)
         qualified.sort(key=lambda r: r["player"])
 
+        total_players = len(by_player)
+        target_raw = sm.get("guild_target", sm.get("min_successful_attempts", 0))
+        target = total_players if target_raw == "all" else int(target_raw)
+
         results.append({
             "name": sm["name"],
             "purpose": sm["purpose"],
-            "needed": sm.get("min_successful_attempts", 0),
+            "needed": target,
+            "min_required": sm.get("min_successful_attempts", 0),
+            "target_label": "全員達標" if target_raw == "all" else f"{target} 人",
             "slots": slots,
             "qualified": qualified,
             "partial": partial,
-            "total_players": len(by_player),
+            "total_players": total_players,
         })
     return results
 
@@ -409,6 +415,14 @@ def render_sm_page(sms):
         bar_class = "" if qcount >= needed else "short"
         deficit = max(0, needed - qcount)
         progress_label = f"{qcount} / {needed}" + (f"  (差 {deficit} 人)" if deficit else "  ✓")
+        # Sub-line: 遊戲最低門檻
+        min_req = sm.get("min_required", 0)
+        sub_line = ""
+        if min_req:
+            min_status = "✓ 已過" if qcount >= min_req else f"差 {min_req - qcount} 人"
+            sub_line = (f'<div style="font-size:11px;color:#94a3b8;margin-top:4px">'
+                        f'目標：{html.escape(sm.get("target_label",""))}　·　'
+                        f'遊戲最低門檻：{min_req} 人 ({min_status})</div>')
 
         parts.extend([
             '<div class="sm-card">',
@@ -418,6 +432,7 @@ def render_sm_page(sms):
             f'<div class="bar"><div class="bar-fill {bar_class}" style="width:{progress_pct:.1f}%"></div></div>',
             f'<div class="bar-text">{progress_label}</div>',
             "</div>",
+            sub_line,
             '<div class="sm-grid">',
         ])
 
@@ -435,7 +450,7 @@ def render_sm_page(sms):
                     rec = st["best_fail"]["rec"]
                     game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
                     below_players.append(f"{row['player']} (R{game_r}, {st['best_fail']['reason']})")
-            count_class = "" if len(ready_players) >= needed else "short"
+            count_class = "" if len(ready_players) >= sm["total_players"] else "short"
             cand_names = ", ".join(html.escape(c["name"]) for c in s["candidates"])
             req_extra = []
             for c in s["candidates"]:
