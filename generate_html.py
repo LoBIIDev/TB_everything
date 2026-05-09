@@ -485,29 +485,45 @@ def render_sm_page(sms):
         else:
             parts.append('<div style="color:#64748b;font-size:12px">尚無</div>')
 
-        # Partial: show all rows missing 1 slot, sorted by "easiest to upgrade"
-        almost = [r for r in sm["partial"] if r["passes"] == len(sm["slots"]) - 1]
-        if almost:
-            parts.append(f'<h4 style="margin-top:14px">⚠ 差 1 隻達標 ({len(almost)})</h4>')
-            for r in almost[:30]:
-                missing_parts = []
-                for st in r["slot_status"]:
-                    if st["passes"]:
-                        continue
-                    s = st["slot"]
-                    if st["best_fail"]:
-                        rec = st["best_fail"]["rec"]
-                        game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
-                        cn = st["best_fail"]["candidate"]["name"]
-                        missing_parts.append(f"{html.escape(s['label'])}: {html.escape(cn)} R{game_r} → {st['best_fail']['reason']}")
-                    else:
-                        missing_parts.append(f"{html.escape(s['label'])}: 未擁有")
-                parts.append(
-                    '<div class="partial-row">'
-                    f'<span class="pn">{html.escape(r["player"])}</span>'
-                    f'<span class="ss">{" / ".join(missing_parts)}</span>'
-                    "</div>"
-                )
+        # All not-yet-qualified players, grouped by how many slots they pass
+        if sm["partial"]:
+            parts.append(f'<h4 style="margin-top:14px">⚠ 未達標玩家 ({len(sm["partial"])})</h4>')
+            slot_count = len(sm["slots"])
+            grouped = {}
+            for r in sm["partial"]:
+                grouped.setdefault(r["passes"], []).append(r)
+            # Display from "closest to passing" downward
+            for pass_n in sorted(grouped.keys(), reverse=True):
+                rows = grouped[pass_n]
+                if pass_n == slot_count - 1:
+                    label = f"差 1 隻達標 ({len(rows)})"
+                elif pass_n == 0:
+                    label = f"完全未入門 ({len(rows)})"
+                else:
+                    label = f"通過 {pass_n}/{slot_count} 槽 ({len(rows)})"
+                parts.append(f'<div style="font-size:12px;color:#94a3b8;margin:10px 0 4px">{label}</div>')
+                for r in rows:
+                    cells = []
+                    for st in r["slot_status"]:
+                        s = st["slot"]
+                        if st["passes"]:
+                            rec = st["best_pass"]["rec"]
+                            game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
+                            cn = st["best_pass"]["candidate"]["name"]
+                            cells.append(f'<span style="color:#4ade80">{html.escape(s["label"])}: {html.escape(cn)} R{game_r} ✓</span>')
+                        elif st["best_fail"]:
+                            rec = st["best_fail"]["rec"]
+                            game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
+                            cn = st["best_fail"]["candidate"]["name"]
+                            cells.append(f'<span style="color:#fbbf24">{html.escape(s["label"])}: {html.escape(cn)} R{game_r} ({html.escape(st["best_fail"]["reason"])})</span>')
+                        else:
+                            cells.append(f'<span style="color:#f87171">{html.escape(s["label"])}: 未擁有</span>')
+                    parts.append(
+                        '<div class="partial-row">'
+                        f'<span class="pn">{html.escape(r["player"])}</span>'
+                        f'<span class="ss">{" / ".join(cells)}</span>'
+                        "</div>"
+                    )
 
         parts.append("</div></div>")  # qualified-block + sm-card
 

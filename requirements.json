@@ -15,10 +15,9 @@
           ]
         },
         {
-          "label": "Cal Kestis 系列",
+          "label": "JKCK + Omicron",
           "min_relic": 7,
           "any_of": [
-            {"name": "Cal Kestis"},
             {
               "name": "Jedi Knight Cal Kestis",
               "require_omicron": "specialskill_JEDIKNIGHTCAL01",
