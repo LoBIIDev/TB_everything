@@ -1,5 +1,33 @@
 {
   "_note": "Operation requirements parsed from screenshots in platoon_req/. char_min_relic=9, ship_min_rarity=7. Total per op should be 90.",
+  "special_missions": [
+    {
+      "name": "Bracca SM (解鎖 Zeffo)",
+      "purpose": "需要 30 次成功清關才解鎖 bonus planet Zeffo（公會自訂：JKCK 必須有 Whirlwind Slam Omicron）",
+      "min_successful_attempts": 30,
+      "required_chars": [
+        {
+          "label": "Cere Junda",
+          "min_relic": 7,
+          "any_of": [
+            {"name": "Cere Junda"}
+          ]
+        },
+        {
+          "label": "Cal Kestis 系列",
+          "min_relic": 7,
+          "any_of": [
+            {"name": "Cal Kestis"},
+            {
+              "name": "Jedi Knight Cal Kestis",
+              "require_omicron": "specialskill_JEDIKNIGHTCAL01",
+              "omicron_label": "Whirlwind Slam (利刃風暴猛擊)"
+            }
+          ]
+        }
+      ]
+    }
+  ],
   "operations": [
     {
       "name": "Vandor",
