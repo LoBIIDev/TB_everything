@@ -37,26 +37,50 @@ API_BASE = "https://swgoh.gg/api"
 
 CURL = shutil.which("curl") or "curl"
 
+# Prefer curl_cffi (browser TLS fingerprint, bypasses Cloudflare on cloud IPs).
+# Fallback to subprocess curl (sufficient on residential IPs).
+try:
+    from curl_cffi import requests as cffi_requests  # type: ignore
+    _HAS_CFFI = True
+except ImportError:
+    _HAS_CFFI = False
+
+
+def _get_via_cffi(url: str) -> dict:
+    r = cffi_requests.get(
+        url,
+        headers={"User-Agent": UA, "Accept": "application/json"},
+        impersonate="chrome",
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def _get_via_curl(url: str) -> dict:
+    result = subprocess.run(
+        [CURL, "-s", "-S", "--fail",
+         "-H", f"User-Agent: {UA}",
+         "-H", "Accept: application/json",
+         "--max-time", "30",
+         url],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"curl exit {result.returncode}: {result.stderr.strip()[:200]}")
+    return json.loads(result.stdout)
+
 
 def http_get_json(url: str, retries: int = 3) -> dict:
-    """Use curl (Anaconda's bundled OpenSSL DLL is broken on this machine)."""
     last_err = None
     for attempt in range(retries):
         try:
-            result = subprocess.run(
-                [CURL, "-s", "-S", "--fail",
-                 "-H", f"User-Agent: {UA}",
-                 "-H", "Accept: application/json",
-                 "--max-time", "30",
-                 url],
-                capture_output=True, text=True, encoding="utf-8",
-            )
-            if result.returncode == 0:
-                return json.loads(result.stdout)
-            last_err = f"curl exit {result.returncode}: {result.stderr.strip()[:200]}"
+            if _HAS_CFFI:
+                return _get_via_cffi(url)
+            return _get_via_curl(url)
         except Exception as e:
-            last_err = str(e)
-        time.sleep(2 + attempt * 2)
+            last_err = e
+            time.sleep(2 + attempt * 2)
     raise RuntimeError(f"GET failed: {url} ({last_err})")
 
 

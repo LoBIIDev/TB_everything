@@ -22,7 +22,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install pyyaml
+        run: pip install pyyaml curl_cffi
 
       - name: Fetch guild rosters
         run: python fetch_guild.py --force
