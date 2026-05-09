@@ -1,9 +1,9 @@
-name: Weekly TB report update
+name: Daily TB report update
 
 on:
   schedule:
-    # Monday 01:00 UTC = Monday 09:00 Asia/Taipei
-    - cron: "0 1 * * 1"
+    # 01:00 UTC = 09:00 Asia/Taipei, every day
+    - cron: "0 1 * * *"
   workflow_dispatch: {}  # 也可手動從 Actions 頁面觸發
 
 permissions:
