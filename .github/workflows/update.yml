@@ -1,0 +1,52 @@
+name: Weekly TB report update
+
+on:
+  schedule:
+    # Monday 01:00 UTC = Monday 09:00 Asia/Taipei
+    - cron: "0 1 * * 1"
+  workflow_dispatch: {}  # 也可手動從 Actions 頁面觸發
+
+permissions:
+  contents: write  # commit/push docs/index.html back to main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Fetch guild rosters
+        run: python fetch_guild.py --force
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: Generate HTML report
+        run: python generate_html.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: Generate Line message snapshot (for log only)
+        run: python line_message.py || true
+        env:
+          PYTHONIOENCODING: utf-8
+
+      - name: Commit & push if HTML changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "auto: weekly TB report refresh ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
+          fi
