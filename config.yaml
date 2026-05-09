@@ -1,0 +1,14 @@
+# Guild + analysis config
+guild_id: t0ti58aCSeaE1ISi-nzdQg
+
+# Per-Operation slot count (RotE: 6 Platoons × 15 char slots = 90)
+operations:
+  - name: Vandor
+    slots: 90
+    min_relic: 9
+  - name: Kafrene
+    slots: 90
+    min_relic: 9
+
+# Cache lifetime in hours; re-fetch player rosters when older
+cache_ttl_hours: 6

@@ -1,0 +1,16 @@
+# Cached player rosters — re-fetchable, kept private to avoid bloat & privacy
+cache/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated reports (keep only HTML in docs/)
+report.md
