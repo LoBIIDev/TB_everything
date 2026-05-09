@@ -34,19 +34,19 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
 
-      - name: Generate Line message snapshot (for log only)
-        run: python line_message.py || true
+      - name: Generate Line message
+        run: python line_message.py
         env:
           PYTHONIOENCODING: utf-8
 
-      - name: Commit & push if HTML changed
+      - name: Commit & push if outputs changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/index.html
+          git add docs/index.html docs/line_message.txt
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "auto: weekly TB report refresh ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git commit -m "auto: daily TB report refresh ($(date -u +'%Y-%m-%d %H:%M UTC'))"
             git push
           fi

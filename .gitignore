@@ -12,6 +12,5 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Generated reports (keep only HTML in docs/)
+# Generated reports (keep only HTML + line message in docs/)
 report.md
-line_message.txt

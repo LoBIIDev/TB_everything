@@ -22,7 +22,7 @@ GUILD_PATH = ROOT / "cache" / "guild.json"
 REQ_PATH = ROOT / "requirements.json"
 ALIAS_PATH = ROOT / "unit_alias.json"  # 簡稱 (preferred)
 ZH_PATH = ROOT / "unit_zh.json"        # 全名繁中 (fallback)
-OUT_PATH = ROOT / "line_message.txt"
+OUT_PATH = ROOT / "docs" / "line_message.txt"
 
 RELIC_OFFSET = 2
 WEB_URL = "https://lobiidev.github.io/TB_everything/"
@@ -148,6 +148,7 @@ def main():
     owners = collect_owners(guild["data"]["members"], target_keys)
     rows = build_combined_deficits(requirements, owners)
     msg = format_message(guild, rows, zh_map)
+    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(msg, encoding="utf-8")
     print(msg)
     print(f"\n[saved to {OUT_PATH}, {OUT_PATH.stat().st_size} bytes]", file=sys.stderr)
