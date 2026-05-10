@@ -5,6 +5,10 @@ on:
     # Every 3 hours UTC (08/11/14/17/20/23/02/05 Asia/Taipei) — 冗餘以防 GitHub 跳過某次排程
     - cron: "0 */3 * * *"
   workflow_dispatch: {}  # 也可手動從 Actions 頁面觸發
+  push:
+    branches: [main]
+    paths:
+      - "claims.yaml"  # /claims push 後雲端自動 fetch+generate+push 最新 HTML
 
 permissions:
   contents: write  # commit/push docs/index.html back to main

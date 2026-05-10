@@ -54,6 +54,7 @@ cd C:/Users/USER/Documents/Projects/swgoh_TB
 完成後告訴使用者：
 - 哪些角色被加入了（add_claim.py 的輸出已經會列）
 - 提醒網址 https://lobiidev.github.io/TB_everything/ 約 1-2 分鐘後生效
+- 因 claims.yaml 有變動，GitHub Actions 會自動觸發一次完整 fetch+generate，再覆蓋一次 HTML（資料才是最新的）
 
 ## 範例
 
