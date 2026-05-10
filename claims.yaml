@@ -6,6 +6,7 @@
 # - 一隻角色可被多人認領（各自獨立判定）
 #
 # Targets 自動取自 requirements.json：op 單位 R9、SM 單位 R7、艦船 7*
+# claims.yaml 變動會觸發 GitHub Actions 自動 fetch+generate+push 最新 HTML
 
 claims:
   Goodnew:
