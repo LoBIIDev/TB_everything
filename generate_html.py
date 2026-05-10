@@ -52,31 +52,9 @@ def _load_name_table(path: Path) -> dict:
 
 
 def build_name_resolver(requirements: dict) -> dict:
-    """Map any user-supplied unit name (English / alias / 繁中) -> canonical English name."""
-    alias_map = _load_name_table(ALIAS_PATH)  # {English: alias}
-    zh_map = _load_name_table(ZH_PATH)        # {English: 繁中}
-
-    resolver = {}  # stripped+lowered -> canonical English
-
-    def add(canonical, *names):
-        for n in (canonical, *names):
-            if not n:
-                continue
-            key = n.strip().lower()
-            resolver.setdefault(key, canonical)
-
-    for op in requirements["operations"]:
-        for u in op["units"]:
-            add(u["name"])
-    for sm in requirements.get("special_missions", []):
-        for r in sm["required_chars"]:
-            for c in r["any_of"]:
-                add(c if isinstance(c, str) else c["name"])
-    for english, alias in alias_map.items():
-        add(english, alias)
-    for english, zh in zh_map.items():
-        add(english, zh)
-    return resolver
+    """Map any user-supplied unit name (English / alias / 繁中 / common acronym) -> canonical English."""
+    from unit_resolver import build_resolver as _shared_build
+    return _shared_build(requirements)
 
 
 def build_targets(requirements: dict) -> dict:
