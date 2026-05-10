@@ -43,7 +43,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add docs/index.html docs/line_message.txt
+          git add docs/index.html docs/line_message.txt claims.yaml
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else

@@ -14,10 +14,15 @@ import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent
 PLAYER_DIR = ROOT / "cache" / "players"
 GUILD_PATH = ROOT / "cache" / "guild.json"
 REQ_PATH = ROOT / "requirements.json"
+ALIAS_PATH = ROOT / "unit_alias.json"
+ZH_PATH = ROOT / "unit_zh.json"
+CLAIMS_PATH = ROOT / "claims.yaml"
 OUT_PATH = ROOT / "docs" / "index.html"
 
 RELIC_OFFSET = 2  # API relic_tier - 2 = in-game relic level
@@ -37,6 +42,140 @@ def load_data():
     guild = json.loads(GUILD_PATH.read_text(encoding="utf-8"))
     requirements = json.loads(REQ_PATH.read_text(encoding="utf-8"))
     return guild, requirements
+
+
+def _load_name_table(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items()
+            if not k.startswith("_") and v}
+
+
+def build_name_resolver(requirements: dict) -> dict:
+    """Map any user-supplied unit name (English / alias / 繁中) -> canonical English name."""
+    alias_map = _load_name_table(ALIAS_PATH)  # {English: alias}
+    zh_map = _load_name_table(ZH_PATH)        # {English: 繁中}
+
+    resolver = {}  # stripped+lowered -> canonical English
+
+    def add(canonical, *names):
+        for n in (canonical, *names):
+            if not n:
+                continue
+            key = n.strip().lower()
+            resolver.setdefault(key, canonical)
+
+    for op in requirements["operations"]:
+        for u in op["units"]:
+            add(u["name"])
+    for sm in requirements.get("special_missions", []):
+        for r in sm["required_chars"]:
+            for c in r["any_of"]:
+                add(c if isinstance(c, str) else c["name"])
+    for english, alias in alias_map.items():
+        add(english, alias)
+    for english, zh in zh_map.items():
+        add(english, zh)
+    return resolver
+
+
+def build_targets(requirements: dict) -> dict:
+    """For each unit (canonical English), figure out the toughest threshold required."""
+    targets = {}
+    for op in requirements["operations"]:
+        for u in op["units"]:
+            key = normalize(u["name"])
+            entry = targets.setdefault(key, {
+                "name": u["name"], "min_relic": 0, "min_rarity": 0,
+            })
+            entry["min_relic"] = max(entry["min_relic"], op["char_min_relic"])
+            entry["min_rarity"] = max(entry["min_rarity"], op["ship_min_rarity"])
+    for sm in requirements.get("special_missions", []):
+        for r in sm["required_chars"]:
+            for c in r["any_of"]:
+                name = c if isinstance(c, str) else c["name"]
+                key = normalize(name)
+                entry = targets.setdefault(key, {
+                    "name": name, "min_relic": 0, "min_rarity": 0,
+                })
+                entry["min_relic"] = max(entry["min_relic"], r["min_relic"])
+    return targets
+
+
+def process_claims(by_player: dict, requirements: dict):
+    """Load claims, auto-prune completed ones, persist file. Returns active claims."""
+    if not CLAIMS_PATH.exists():
+        return [], []
+
+    raw = yaml.safe_load(CLAIMS_PATH.read_text(encoding="utf-8")) or {}
+    claims_in = raw.get("claims") or {}
+    if not claims_in:
+        return [], []
+
+    resolver = build_name_resolver(requirements)
+    targets = build_targets(requirements)
+    # Player name -> roster (case-insensitive lookup)
+    name_to_player = {p["name"].strip().lower(): p for p in by_player.values()}
+
+    active = []     # rendered list: [{player, units:[{display, status}]}]
+    completed = [] # for logging
+    new_claims = {}
+
+    for player_name, units in claims_in.items():
+        if not units:
+            continue
+        player = name_to_player.get(player_name.strip().lower())
+        keep = []
+        items_for_render = []
+        for raw_name in units:
+            canonical = resolver.get(str(raw_name).strip().lower())
+            if not canonical:
+                items_for_render.append({"display": str(raw_name), "status": "未知名稱"})
+                keep.append(raw_name)
+                continue
+            key = normalize(canonical)
+            target = targets.get(key)
+            rec = player["roster"].get(key) if player else None
+            if rec is None or target is None:
+                items_for_render.append({"display": canonical, "status": "未擁有" if player else "玩家不存在"})
+                keep.append(raw_name)
+                continue
+            ct = rec.get("combat_type") or 0
+            if ct == 2:  # ship
+                met = rec["rarity"] >= target["min_rarity"]
+                cur_label = f"{rec['rarity']}*"
+                tgt_label = f"{target['min_rarity']}*"
+            else:        # character
+                met = rec["relic_tier"] >= target["min_relic"] + RELIC_OFFSET
+                cur_label = f"R{max(0, rec['relic_tier'] - RELIC_OFFSET)}"
+                tgt_label = f"R{target['min_relic']}"
+            if met:
+                completed.append((player_name, canonical, cur_label))
+                # do not keep
+            else:
+                items_for_render.append({"display": canonical, "status": f"{cur_label} → {tgt_label}"})
+                keep.append(raw_name)
+        if keep:
+            new_claims[player_name] = keep
+        if items_for_render:
+            active.append({"player": player_name, "items": items_for_render})
+
+    # Persist if changed
+    if new_claims != claims_in:
+        out = {"claims": new_claims}
+        # Preserve top-of-file comments by reading original then prepending
+        original = CLAIMS_PATH.read_text(encoding="utf-8")
+        header_lines = []
+        for line in original.splitlines():
+            if line.startswith("#") or not line.strip():
+                header_lines.append(line)
+            else:
+                break
+        body = yaml.dump(out, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        CLAIMS_PATH.write_text("\n".join(header_lines) + ("\n" if header_lines else "") + body,
+                               encoding="utf-8")
+
+    return active, completed
 
 
 def collect(members, target_keys):
@@ -317,6 +456,18 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #1e293b;
                margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
 .partial-row .pn { color: #cbd5e1; }
 .partial-row .ss { color: #94a3b8; font-size: 11px; }
+.claims-block { background: rgba(251, 191, 36, 0.08); border: 1px solid #b45309; border-radius: 12px;
+                padding: 14px 18px; margin-bottom: 20px; }
+.claims-block h2 { margin: 0 0 12px; font-size: 15px; color: #fbbf24; border: none; padding: 0; }
+.claims-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.claim-card { background: #1e293b; border-radius: 8px; padding: 8px 12px; }
+.claim-player { font-weight: 700; font-size: 13px; color: #fbbf24; margin-bottom: 4px; }
+.claim-units { list-style: none; padding: 0; margin: 0; }
+.claim-units li { display: flex; justify-content: space-between; align-items: center;
+                  padding: 3px 0; font-size: 12px; color: #cbd5e1; }
+.claim-status { color: #94a3b8; font-size: 11px; tabular-nums: 1; }
+.claim-tag { display: inline-block; font-size: 10px; padding: 1px 6px; background: #b45309;
+             color: #fef3c7; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
 """
 
 JS = """
@@ -349,7 +500,31 @@ window.addEventListener('DOMContentLoaded', () => {
 """
 
 
-def render_ops_page(rows):
+def render_claims_block(active_claims):
+    if not active_claims:
+        return ""
+    total_units = sum(len(e["items"]) for e in active_claims)
+    parts = [
+        '<section class="claims-block">',
+        f'<h2>🚧 認領中 ({len(active_claims)} 人 · {total_units} 隻)</h2>',
+        '<div class="claims-grid">',
+    ]
+    for entry in active_claims:
+        parts.append('<div class="claim-card">')
+        parts.append(f'<div class="claim-player">{html.escape(entry["player"])}</div>')
+        parts.append('<ul class="claim-units">')
+        for it in entry["items"]:
+            parts.append(
+                f'<li><span>{html.escape(it["display"])}</span>'
+                f'<span class="claim-status">{html.escape(it["status"])}</span></li>'
+            )
+        parts.append("</ul></div>")
+    parts.append("</div></section>")
+    return "".join(parts)
+
+
+def render_ops_page(rows, claim_index=None):
+    claim_index = claim_index or {}
     total_need = sum(r["needed"] for r in rows)
     total_deficit = sum(r["deficit"] for r in rows)
     total_filled = total_need - total_deficit
@@ -385,10 +560,16 @@ def render_ops_page(rows):
                 f'<span class="mt">{metric}</span></div>'
             )
         owners_block = "".join(owners_html) or '<div style="color:#64748b;font-size:12px;padding:6px 0">無人擁有</div>'
+        claimers = claim_index.get(r["name"], [])
+        claim_tag = ""
+        if claimers:
+            who = "、".join(html.escape(p) for p in claimers)
+            claim_tag = f'<span class="claim-tag" title="{who} 認領中">🚧 {len(claimers)}</span>'
+
         parts.extend([
             f'<div class="unit" data-name="{html.escape(r["name"])}" data-deficit="{r["deficit"]}">',
             '<div class="unit-row" onclick="toggleUnit(this)">',
-            f'<div><div class="unit-name">{html.escape(r["name"])}</div>',
+            f'<div><div class="unit-name">{html.escape(r["name"])} {claim_tag}</div>',
             f'<div class="ops-tag">{ops_str}</div></div>',
             f'<span class="badge {ct_class}">{ct_label}</span>',
             f'<span class="need">需 {r["needed"]} · 有 {r["eligible"]}/{r["owners_total"]}</span>',
@@ -531,7 +712,7 @@ def render_sm_page(sms):
     return "".join(parts)
 
 
-def render(guild, rows, sms, members_count):
+def render(guild, rows, sms, active_claims, claim_index, members_count):
     now = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %Z")
     parts = [
         "<!DOCTYPE html>",
@@ -551,7 +732,8 @@ def render(guild, rows, sms, members_count):
         '<button class="tab" data-tab="ops" onclick="showTab(\'ops\')">Operation 缺口</button>',
         '<button class="tab" data-tab="sm" onclick="showTab(\'sm\')">Special Mission</button>',
         "</div>",
-        render_ops_page(rows),
+        render_claims_block(active_claims),
+        render_ops_page(rows, claim_index),
         render_sm_page(sms),
         '<footer>data: swgoh.gg API · generated by swgoh_TB</footer>',
         "</div></body></html>",
@@ -574,7 +756,18 @@ def main():
     owners, name_lookup, by_player = collect(members, target_keys)
     rows = build_unit_rows(requirements, owners, name_lookup)
     sms = build_special_missions(requirements.get("special_missions", []), by_player)
-    html_text = render(guild, rows, sms, members_count=len(members))
+    active_claims, completed_claims = process_claims(by_player, requirements)
+    if completed_claims:
+        print("[claims pruned]")
+        for p, n, cur in completed_claims:
+            print(f"  ✓ {p} / {n}  ({cur})")
+    # Build per-unit claim index for inline display in unit cards
+    claim_index = {}  # canonical English name -> [player_name]
+    for entry in active_claims:
+        for it in entry["items"]:
+            claim_index.setdefault(it["display"], []).append(entry["player"])
+    html_text = render(guild, rows, sms, active_claims, claim_index,
+                       members_count=len(members))
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(html_text, encoding="utf-8")
     size_kb = OUT_PATH.stat().st_size / 1024

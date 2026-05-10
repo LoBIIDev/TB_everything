@@ -1,0 +1,15 @@
+# claims.yaml — 公會成員正在準備中的角色
+#
+# 達到 Operation 要求的等級後會自動從這份清單移除（重跑 generate_html.py 時觸發）。
+# - 玩家名稱必須與 swgoh.gg 上的顯示名一致
+# - 角色名稱可用英文（如 Echo）、unit_alias.json 的簡稱、或 unit_zh.json 的繁中全名
+# - 一隻角色可被多人認領（各自獨立判定）
+#
+# Targets 自動取自 requirements.json：op 單位 R9、SM 單位 R7、艦船 7*
+
+claims:
+  Goodnew:
+    - 50R-T
+    - Echo
+    - 易思考斯
+    - 豪斯士兵
