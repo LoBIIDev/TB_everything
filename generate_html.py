@@ -446,6 +446,37 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #1e293b;
 .claim-status { color: #94a3b8; font-size: 11px; tabular-nums: 1; }
 .claim-tag { display: inline-block; font-size: 10px; padding: 1px 6px; background: #b45309;
              color: #fef3c7; border-radius: 999px; margin-left: 6px; vertical-align: middle; }
+.fresh-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.fresh-stat { background: #1e293b; border-radius: 10px; padding: 14px 16px;
+              display: flex; flex-direction: column; align-items: center; }
+.fresh-stat .n { font-size: 28px; font-weight: 700; tabular-nums: 1; }
+.fresh-stat .l { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+.fresh-stat.ok .n { color: #4ade80; }
+.fresh-stat.warn .n { color: #fbbf24; }
+.fresh-stat.stale .n { color: #f87171; }
+.fresh-note { font-size: 12px; color: #94a3b8; background: #1e293b; border-radius: 8px;
+              padding: 10px 14px; margin-bottom: 14px; border-left: 3px solid #fbbf24; }
+.fresh-note strong { color: #fbbf24; }
+.fresh-list { display: flex; flex-direction: column; gap: 4px; }
+.fresh-row { display: grid; grid-template-columns: 1fr 110px 110px 70px 60px; gap: 10px;
+             align-items: center; background: #1e293b; border-radius: 8px;
+             padding: 8px 12px; font-size: 13px; }
+.fresh-row .pn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fresh-row .ac { color: #64748b; font-size: 11px; tabular-nums: 1; }
+.fresh-row .ts { color: #94a3b8; font-size: 12px; tabular-nums: 1; }
+.fresh-row .age { color: #cbd5e1; font-weight: 700; tabular-nums: 1; text-align: right; }
+.fresh-row .tag { font-size: 10px; padding: 2px 8px; border-radius: 999px;
+                  text-align: center; font-weight: 700; text-transform: uppercase; }
+.fresh-row.ok { border-left: 3px solid #22c55e; }
+.fresh-row.ok .tag { background: #14532d; color: #bbf7d0; }
+.fresh-row.warn { border-left: 3px solid #fbbf24; }
+.fresh-row.warn .tag { background: #78350f; color: #fde68a; }
+.fresh-row.stale { border-left: 3px solid #f87171; }
+.fresh-row.stale .tag { background: #7f1d1d; color: #fecaca; }
+@media (max-width: 560px) {
+  .fresh-row { grid-template-columns: 1fr 80px 50px; }
+  .fresh-row .ac, .fresh-row .tag { display: none; }
+}
 """
 
 JS = """
@@ -690,7 +721,72 @@ def render_sm_page(sms):
     return "".join(parts)
 
 
-def render(guild, rows, sms, active_claims, claim_index, members_count):
+def build_freshness(members):
+    """Return list of (name, ally_code, last_updated_dt, age_hours) sorted by age desc."""
+    out = []
+    now = datetime.now(timezone.utc)
+    for m in members:
+        path = PLAYER_DIR / f"{m['ally_code']}.json"
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))["data"]
+            lu = datetime.fromisoformat(data["last_updated"])
+        except (KeyError, ValueError):
+            continue
+        age_h = (now - lu).total_seconds() / 3600
+        out.append((m["player_name"], m["ally_code"], lu, age_h))
+    out.sort(key=lambda r: -r[3])
+    return out
+
+
+def render_freshness_page(freshness):
+    if not freshness:
+        return '<div class="page" id="page-fresh"></div>'
+    stale = [r for r in freshness if r[3] > 48]
+    warn = [r for r in freshness if 24 < r[3] <= 48]
+    fresh = [r for r in freshness if r[3] <= 24]
+
+    parts = ['<div class="page" id="page-fresh">']
+    parts.append(
+        '<div class="fresh-summary">'
+        f'<div class="fresh-stat ok"><span class="n">{len(fresh)}</span><span class="l">Fresh (≤24h)</span></div>'
+        f'<div class="fresh-stat warn"><span class="n">{len(warn)}</span><span class="l">Warn (24–48h)</span></div>'
+        f'<div class="fresh-stat stale"><span class="n">{len(stale)}</span><span class="l">Stale (&gt;48h)</span></div>'
+        '</div>'
+    )
+    parts.append(
+        '<div class="fresh-note">last_updated 由 swgoh.gg 維護。若顯示 stale，請該玩家'
+        '<strong>開啟 swgoh.gg 網頁</strong>或重登遊戲讓資料同步。</div>'
+    )
+
+    parts.append('<div class="fresh-list">')
+    for name, ac, lu, age in freshness:
+        if age > 48:
+            cls, tag = 'stale', 'STALE'
+        elif age > 24:
+            cls, tag = 'warn', 'warn'
+        else:
+            cls, tag = 'ok', 'fresh'
+        if age >= 24:
+            age_str = f"{age/24:.1f}d"
+        else:
+            age_str = f"{age:.1f}h"
+        ts = lu.astimezone().strftime("%m-%d %H:%M")
+        parts.append(
+            f'<div class="fresh-row {cls}">'
+            f'<span class="pn">{html.escape(name)}</span>'
+            f'<span class="ac">{ac}</span>'
+            f'<span class="ts">{ts}</span>'
+            f'<span class="age">{age_str}</span>'
+            f'<span class="tag">{tag}</span>'
+            '</div>'
+        )
+    parts.append('</div></div>')
+    return "".join(parts)
+
+
+def render(guild, rows, sms, active_claims, claim_index, members_count, freshness):
     now = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %Z")
     parts = [
         "<!DOCTYPE html>",
@@ -709,10 +805,12 @@ def render(guild, rows, sms, active_claims, claim_index, members_count):
         '<div class="tabs">',
         '<button class="tab" data-tab="ops" onclick="showTab(\'ops\')">Operation 缺口</button>',
         '<button class="tab" data-tab="sm" onclick="showTab(\'sm\')">Special Mission</button>',
+        '<button class="tab" data-tab="fresh" onclick="showTab(\'fresh\')">資料新鮮度</button>',
         "</div>",
         render_claims_block(active_claims),
         render_ops_page(rows, claim_index),
         render_sm_page(sms),
+        render_freshness_page(freshness),
         '<footer>data: swgoh.gg API · generated by swgoh_TB</footer>',
         "</div></body></html>",
     ]
@@ -744,8 +842,12 @@ def main():
     for entry in active_claims:
         for it in entry["items"]:
             claim_index.setdefault(it["display"], []).append(entry["player"])
+    freshness = build_freshness(members)
+    stale_n = sum(1 for r in freshness if r[3] > 48)
+    if stale_n:
+        print(f"[freshness] {stale_n} player(s) >48h stale on swgoh.gg")
     html_text = render(guild, rows, sms, active_claims, claim_index,
-                       members_count=len(members))
+                       members_count=len(members), freshness=freshness)
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(html_text, encoding="utf-8")
     size_kb = OUT_PATH.stat().st_size / 1024
