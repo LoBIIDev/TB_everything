@@ -32,10 +32,10 @@ cd C:/Users/USER/Documents/Projects/swgoh_TB
 
 1. **先 pull 最新**（確保不衝突）：
    ```bash
-   git pull --rebase
+   git pull --rebase --autostash
    ```
 
-2. **新增認領**（最常見情境）：
+2. **新增認領**：
    ```bash
    PYTHONIOENCODING=utf-8 /c/Users/USER/anaconda3/python.exe add_claim.py "<player>" "<unit1>" "<unit2>" ...
    ```
@@ -44,18 +44,22 @@ cd C:/Users/USER/Documents/Projects/swgoh_TB
    PYTHONIOENCODING=utf-8 /c/Users/USER/anaconda3/python.exe add_claim.py "<player>" "<unit1>, <unit2>, <unit3>"
    ```
 
-3. **commit + push**（**只推 claims.yaml**，不本地 generate HTML）：
+3. **本地 generate HTML**（cache 內已有最近一次 Task Scheduler 抓的 roster，generate 很快、不用再 fetch）：
    ```bash
-   git add claims.yaml
+   PYTHONIOENCODING=utf-8 /c/Users/USER/anaconda3/python.exe generate_html.py
+   PYTHONIOENCODING=utf-8 /c/Users/USER/anaconda3/python.exe line_message.py
+   ```
+
+4. **commit + push**：
+   ```bash
+   git add claims.yaml docs/index.html docs/line_message.txt
    git commit -m "claims: <player> 新增 N 隻"
    git push
    ```
 
-   **不要在本機跑 `generate_html.py` 也不要 push `docs/index.html`**。原因：本機 `cache/` 抓不到（curl_cffi 裝不起來），用舊 cache 產出的 HTML 會比雲端的舊。`claims.yaml` 一被 push，GitHub Actions（`.github/workflows/update.yml` 已設 `push.paths: claims.yaml` trigger）會用雲端 fresh fetch 跑完整 fetch+generate+push，約 1-2 分鐘 GitHub Pages 上會出現最新資料 + 新認領的 HTML。
-
 完成後告訴使用者：
 - 哪些角色被加入了（add_claim.py 的輸出已經會列）
-- GitHub Actions 已被觸發，約 1-2 分鐘後 https://lobiidev.github.io/TB_everything/ 會看到含新認領的最新版
+- 新版 HTML 已直接 push，約 30 秒後 https://lobiidev.github.io/TB_everything/ 會生效
 
 ## 範例
 
@@ -80,4 +84,5 @@ User: `/claims`
 
 - 名稱無法解析時 add_claim.py 會 warn 但仍記錄（之後不會自動 prune）
 - 暱稱模糊比對若同時對到多人會 abort 並列出候選名單，請改用 ally_code 或更精確的字串
-- pull --rebase 是因為 GitHub Actions 可能在這之間 push 了 docs/index.html
+- GitHub Actions 已停用——更新完全靠本機 Task Scheduler（每 3 小時自動 fetch+regenerate）+ /claims 的即時 generate
+- 本機 cache TTL 6 小時，generate_html.py 直接讀 cache 不會打 API，所以非常快
