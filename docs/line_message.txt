@@ -1,7 +1,7 @@
 【Legend of Bahamut II】Vandor + Kafrene Operation 缺口
-更新：2026-06-18　|　總缺口 18 隻 R9 角色
+更新：2026-06-18　|　總缺口 17 隻 R9 角色
 
-▍缺 1（18 隻角色）
+▍缺 1（17 隻角色）
 ・CLS -1
 ・芭莉絲 -1
 ・白芭 -1
@@ -18,7 +18,6 @@
 ・原版Omega -1
 ・抵抗士兵 -1
 ・T3-M4 -1
-・老邱 -1
 ・札爾巴 -1
 
 📊 詳細：https://lobiidev.github.io/TB_everything/
