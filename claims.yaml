@@ -9,7 +9,5 @@
 # claims.yaml 變動會觸發 GitHub Actions 自動 fetch+generate+push 最新 HTML
 
 claims:
-  Goodnew:
-  - Hoth Rebel Soldier
   Kenshincs:
   - Resistance Trooper
