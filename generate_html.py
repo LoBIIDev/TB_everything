@@ -736,69 +736,124 @@ def render_sm_page(sms):
     return "".join(parts)
 
 
-def render_zeffo_page(sms):
-    """Dedicated per-player alignment table for the Zeffo-unlock (Bracca SM) squad."""
-    sm = next((s for s in sms if "zeffo" in s["name"].lower()), None)
+UNITS_META_PATH = ROOT / "cache" / "units_meta.json"
+
+
+def build_zeffo_planet(members, zeffo_cfg, units_meta):
+    """Per-player readiness for the Zeffo bonus-planet missions.
+
+    Mission types (from requirements.json zeffo_missions):
+      faction — need `count` characters matching `match` at min_relic+
+                (`match` is a category name, or "alignment:<value>")
+      unit    — need the specific character (base_id) at min_relic+
+      ship    — need the named ship at min_rarity+ stars
+    """
+    if not zeffo_cfg or not units_meta:
+        return None
+    thr = zeffo_cfg["min_relic"] + RELIC_OFFSET
+    missions = zeffo_cfg["missions"]
+    rows = []
+    for m in members:
+        path = PLAYER_DIR / f"{m['ally_code']}.json"
+        if not path.exists():
+            continue
+        counts = {ms["id"]: 0 for ms in missions}
+        unit_hits = {}   # mission id -> rec (for unit/ship types)
+        for u in json.loads(path.read_text(encoding="utf-8")).get("units", []):
+            d = u.get("data", {})
+            bid = d.get("base_id")
+            ct = d.get("combat_type") or 0
+            for ms in missions:
+                if ms["type"] == "ship":
+                    if ct == 2 and d.get("name") == ms["name"]:
+                        unit_hits[ms["id"]] = d
+                elif ct == 1:
+                    if ms["type"] == "unit":
+                        if bid == ms["base_id"]:
+                            unit_hits[ms["id"]] = d
+                    elif (d.get("relic_tier") or 0) >= thr:
+                        mm = units_meta.get(bid) or {}
+                        match = ms["match"]
+                        if match.startswith("alignment:"):
+                            hit = mm.get("alignment") == match.split(":", 1)[1]
+                        else:
+                            hit = match in (mm.get("categories") or [])
+                        if hit:
+                            counts[ms["id"]] += 1
+        cells = []
+        for ms in missions:
+            if ms["type"] == "faction":
+                n = counts[ms["id"]]
+                cells.append({"pass": n >= ms["count"], "text": f"{n} 隻" if n >= ms["count"] else f"{n}/{ms['count']}"})
+            elif ms["type"] == "unit":
+                d = unit_hits.get(ms["id"])
+                r = max(0, (d.get("relic_tier") or 0) - RELIC_OFFSET) if d else None
+                ok = d is not None and (d.get("relic_tier") or 0) >= thr
+                cells.append({"pass": ok, "text": f"R{r}" if d else "未擁有"})
+            else:  # ship
+                d = unit_hits.get(ms["id"])
+                rar = (d.get("rarity") or 0) if d else 0
+                ok = rar >= ms["min_rarity"]
+                cells.append({"pass": ok, "text": f"{rar}★" if d else "未擁有"})
+        rows.append({"player": m["player_name"], "cells": cells,
+                     "passed": sum(1 for c in cells if c["pass"])})
+    per_mission = [sum(1 for r in rows if r["cells"][i]["pass"]) for i in range(len(missions))]
+    return {"missions": missions, "rows": rows, "per_mission": per_mission,
+            "min_relic": zeffo_cfg["min_relic"],
+            "full": sum(1 for r in rows if r["passed"] == len(missions))}
+
+
+def render_zeffo_page(zeffo):
+    """Per-player alignment table for the Zeffo bonus-planet missions."""
     parts = ['<div class="page" id="page-zeffo">']
-    if sm is None:
-        parts.append('<p style="color:#94a3b8">尚無 Zeffo 相關 Special Mission 設定。</p></div>')
+    if zeffo is None:
+        parts.append('<p style="color:#94a3b8">Zeffo 任務資料未就緒（缺 zeffo_missions 設定或 cache/units_meta.json——'
+                     '跑一次 fetch_guild.py 即可）。</p></div>')
         return "".join(parts)
 
-    total = sm["total_players"]
-    qn = len(sm["qualified"])
-    pn = len(sm["partial"])
-    progress_pct = min(100, qn * 100 / max(1, total))
-    bar_class = "" if qn >= total else "short"
-
-    # Rule line derived from slots so it stays in sync with requirements.json
-    rule_bits = []
-    for s in sm["slots"]:
-        extra = "".join(
-            f"＋{c.get('omicron_label', c['require_omicron'])}"
-            for c in s["candidates"] if c.get("require_omicron"))
-        rule_bits.append(f"{s['label']} R{s['min_relic']}+{extra}")
-    rule_line = "　·　".join(rule_bits)
+    missions = zeffo["missions"]
+    total = len(zeffo["rows"])
+    full = zeffo["full"]
+    progress_pct = min(100, full * 100 / max(1, total))
+    bar_class = "" if full >= total else "short"
 
     parts.extend([
         '<div class="summary">',
         f'<div class="stat"><div class="label">公會成員</div><div class="value">{total}</div></div>',
-        f'<div class="stat ok"><div class="label">已達標</div><div class="value">{qn}</div></div>',
-        f'<div class="stat warn"><div class="label">未達標</div><div class="value">{pn}</div></div>',
+        f'<div class="stat ok"><div class="label">全任務就緒</div><div class="value">{full}</div></div>',
+        f'<div class="stat warn"><div class="label">有缺口</div><div class="value">{total - full}</div></div>',
         "</div>",
         '<div class="sm-progress">',
         f'<div class="bar"><div class="bar-fill {bar_class}" style="width:{progress_pct:.1f}%"></div></div>',
-        f'<div class="bar-text">{qn} / {total}' + ("　✓ 全員達標" if qn >= total else f"　(差 {total - qn} 人)") + '</div>',
+        f'<div class="bar-text">{full} / {total}' + ("　✓ 全員達標" if full >= total else f"　(差 {total - full} 人)") + '</div>',
         "</div>",
-        f'<div class="fresh-note">達標條件：<strong>{html.escape(rule_line)}</strong>　—　'
-        f'{html.escape(sm["purpose"])}</div>',
+        f'<div class="fresh-note">Zeffo 獎勵星球（Bracca SM 30 次解鎖）：'
+        f'角色一律 <strong>R{zeffo["min_relic"]}+</strong>、艦船 <strong>7★</strong>。'
+        f'各欄顯示可用隻數或關鍵單位狀態。</div>',
     ])
 
-    cols = len(sm["slots"])
-    grid = f"grid-template-columns:minmax(130px,1fr) repeat({cols},minmax(160px,2fr)) 88px;"
+    cols = len(missions)
+    grid = f"grid-template-columns:minmax(130px,1fr) repeat({cols},minmax(96px,1fr)) 88px;"
     parts.append('<div class="zeffo-scroll">')
-    head_cells = "".join(f"<span>{html.escape(s['label'])}</span>" for s in sm["slots"])
-    parts.append(f'<div class="zrow head" style="{grid}"><span>玩家</span>{head_cells}<span>狀態</span></div>')
+    head_cells = []
+    for ms, per in zip(missions, zeffo["per_mission"]):
+        head_cells.append(
+            f"<span>{html.escape(ms['label'])}<br>"
+            f"<span style='text-transform:none;color:#64748b'>{per} / {total} 人可打</span></span>")
+    head = "".join(head_cells)
+    parts.append(f'<div class="zrow head" style="{grid}"><span>玩家</span>{head}<span>狀態</span></div>')
 
-    def cell(st):
-        if st["passes"]:
-            rec = st["best_pass"]["rec"]
-            game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
-            omi = "、Omi ✓" if st["best_pass"]["candidate"].get("require_omicron") else ""
-            return f'<span class="zcell pass">R{game_r} ✓{omi}</span>'
-        if st["best_fail"]:
-            rec = st["best_fail"]["rec"]
-            game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
-            return f'<span class="zcell fail">R{game_r}（{html.escape(st["best_fail"]["reason"])}）</span>'
-        return '<span class="zcell miss">未擁有</span>'
-
-    for row in sm["partial"] + sm["qualified"]:
-        ok = row["passes"] == cols
-        cells = "".join(cell(st) for st in row["slot_status"])
+    ordered = sorted(zeffo["rows"], key=lambda r: (r["passed"] == cols, r["player"].lower()))
+    for r in ordered:
+        ok = r["passed"] == cols
+        cells = "".join(
+            f'<span class="zcell {"pass" if c["pass"] else "fail"}">{html.escape(c["text"])}{" ✓" if c["pass"] else ""}</span>'
+            for c in r["cells"])
         status = ('<span class="zstatus ok">達標</span>' if ok
-                  else f'<span class="zstatus no">差 {cols - row["passes"]} 槽</span>')
+                  else f'<span class="zstatus no">缺 {cols - r["passed"]} 項</span>')
         parts.append(
             f'<div class="zrow {"ok" if ok else "no"}" style="{grid}">'
-            f'<span class="pn">{html.escape(row["player"])}</span>{cells}{status}</div>')
+            f'<span class="pn">{html.escape(r["player"])}</span>{cells}{status}</div>')
 
     parts.append("</div></div>")
     return "".join(parts)
@@ -869,7 +924,7 @@ def render_freshness_page(freshness):
     return "".join(parts)
 
 
-def render(guild, rows, sms, active_claims, claim_index, members_count, freshness):
+def render(guild, rows, sms, zeffo, active_claims, claim_index, members_count, freshness):
     now = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %Z")
     parts = [
         "<!DOCTYPE html>",
@@ -894,7 +949,7 @@ def render(guild, rows, sms, active_claims, claim_index, members_count, freshnes
         render_claims_block(active_claims),
         render_ops_page(rows, claim_index),
         render_sm_page(sms),
-        render_zeffo_page(sms),
+        render_zeffo_page(zeffo),
         render_freshness_page(freshness),
         '<footer>data: swgoh.gg API · generated by swgoh_TB</footer>',
         "</div></body></html>",
@@ -927,11 +982,16 @@ def main():
     for entry in active_claims:
         for it in entry["items"]:
             claim_index.setdefault(it["display"], []).append(entry["player"])
+    units_meta = (json.loads(UNITS_META_PATH.read_text(encoding="utf-8"))
+                  if UNITS_META_PATH.exists() else {})
+    zeffo = build_zeffo_planet(members, requirements.get("zeffo_missions"), units_meta)
+    if zeffo:
+        print(f"[zeffo] full-clear-ready: {zeffo['full']}/{len(zeffo['rows'])}")
     freshness = build_freshness(members)
     stale_n = sum(1 for r in freshness if r[3] > 48)
     if stale_n:
         print(f"[freshness] {stale_n} player(s) >48h stale on swgoh.gg")
-    html_text = render(guild, rows, sms, active_claims, claim_index,
+    html_text = render(guild, rows, sms, zeffo, active_claims, claim_index,
                        members_count=len(members), freshness=freshness)
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(html_text, encoding="utf-8")

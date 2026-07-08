@@ -100,6 +100,27 @@ def cache_age_hours(path: Path) -> float:
     return (time.time() - path.stat().st_mtime) / 3600
 
 
+UNITS_META_PATH = CACHE_DIR / "units_meta.json"
+
+
+def fetch_units_meta(ttl_hours: float = 24.0, force: bool = False):
+    """Cache base_id -> {name, alignment, categories} for all characters.
+    Needed for faction-count checks (e.g. Zeffo UFU / Clone missions)."""
+    if not force and cache_age_hours(UNITS_META_PATH) < ttl_hours:
+        return
+    chars = http_get_json(f"{API_BASE}/characters/")
+    meta = {
+        c["base_id"]: {
+            "name": c["name"],
+            "alignment": c.get("alignment"),
+            "categories": c.get("categories") or [],
+        }
+        for c in chars if c.get("base_id")
+    }
+    UNITS_META_PATH.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    print(f"[units] meta cached: {len(meta)} characters")
+
+
 def fetch_player(ally_code: int, ttl_hours: float, force: bool) -> dict:
     out = PLAYER_DIR / f"{ally_code}.json"
     if not force and cache_age_hours(out) < ttl_hours:
@@ -120,6 +141,7 @@ def main():
 
     guild = fetch_guild(cfg["guild_id"])
     GUILD_PATH.write_text(json.dumps(guild, ensure_ascii=False), encoding="utf-8")
+    fetch_units_meta()  # 24h TTL — cheap, one request
     members = guild["data"]["members"]
     print(f"[guild] {guild['data']['name']} — {len(members)} members")
 

@@ -28,6 +28,17 @@
       ]
     }
   ],
+  "zeffo_missions": {
+    "_note": "Zeffo 獎勵星球（Phase 3，由 Bracca SM 30 次解鎖）。全角色 R7+、艦船 7★。來源：swgoh.wiki Zone Information + starwars-fans.com RotE guides。",
+    "min_relic": 7,
+    "missions": [
+      {"id": "ls", "label": "CM 光明面×5", "type": "faction", "match": "alignment:Light Side", "count": 5},
+      {"id": "ufu", "label": "CM UFU×5", "type": "faction", "match": "Unaligned Force User", "count": 5},
+      {"id": "jkck", "label": "CM JKCK 帶隊", "type": "unit", "base_id": "JEDIKNIGHTCAL", "display": "Jedi Knight Cal Kestis"},
+      {"id": "clone", "label": "SM 複製人×5", "type": "faction", "match": "Clone Trooper", "count": 5},
+      {"id": "fleet", "label": "艦隊 Negotiator", "type": "ship", "name": "Negotiator", "min_rarity": 7}
+    ]
+  },
   "operations": [
     {
       "name": "Vandor",
