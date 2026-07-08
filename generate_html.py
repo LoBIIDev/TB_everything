@@ -477,6 +477,21 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #1e293b;
   .fresh-row { grid-template-columns: 1fr 80px 50px; }
   .fresh-row .ac, .fresh-row .tag { display: none; }
 }
+.zeffo-scroll { overflow-x: auto; }
+.zrow { display: grid; gap: 10px; align-items: center; background: #1e293b;
+        border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 4px; min-width: 560px; }
+.zrow.ok { border-left: 3px solid #22c55e; }
+.zrow.no { border-left: 3px solid #fbbf24; }
+.zrow.head { background: transparent; color: #94a3b8; font-size: 11px; text-transform: uppercase;
+             letter-spacing: 0.05em; border-left: 3px solid transparent; margin-bottom: 6px; }
+.zrow .pn { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zcell { tabular-nums: 1; }
+.zcell.pass { color: #4ade80; }
+.zcell.fail { color: #fbbf24; }
+.zcell.miss { color: #f87171; }
+.zstatus { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px; text-align: center; }
+.zstatus.ok { background: #14532d; color: #bbf7d0; }
+.zstatus.no { background: #78350f; color: #fed7aa; }
 """
 
 JS = """
@@ -721,6 +736,74 @@ def render_sm_page(sms):
     return "".join(parts)
 
 
+def render_zeffo_page(sms):
+    """Dedicated per-player alignment table for the Zeffo-unlock (Bracca SM) squad."""
+    sm = next((s for s in sms if "zeffo" in s["name"].lower()), None)
+    parts = ['<div class="page" id="page-zeffo">']
+    if sm is None:
+        parts.append('<p style="color:#94a3b8">尚無 Zeffo 相關 Special Mission 設定。</p></div>')
+        return "".join(parts)
+
+    total = sm["total_players"]
+    qn = len(sm["qualified"])
+    pn = len(sm["partial"])
+    progress_pct = min(100, qn * 100 / max(1, total))
+    bar_class = "" if qn >= total else "short"
+
+    # Rule line derived from slots so it stays in sync with requirements.json
+    rule_bits = []
+    for s in sm["slots"]:
+        extra = "".join(
+            f"＋{c.get('omicron_label', c['require_omicron'])}"
+            for c in s["candidates"] if c.get("require_omicron"))
+        rule_bits.append(f"{s['label']} R{s['min_relic']}+{extra}")
+    rule_line = "　·　".join(rule_bits)
+
+    parts.extend([
+        '<div class="summary">',
+        f'<div class="stat"><div class="label">公會成員</div><div class="value">{total}</div></div>',
+        f'<div class="stat ok"><div class="label">已達標</div><div class="value">{qn}</div></div>',
+        f'<div class="stat warn"><div class="label">未達標</div><div class="value">{pn}</div></div>',
+        "</div>",
+        '<div class="sm-progress">',
+        f'<div class="bar"><div class="bar-fill {bar_class}" style="width:{progress_pct:.1f}%"></div></div>',
+        f'<div class="bar-text">{qn} / {total}' + ("　✓ 全員達標" if qn >= total else f"　(差 {total - qn} 人)") + '</div>',
+        "</div>",
+        f'<div class="fresh-note">達標條件：<strong>{html.escape(rule_line)}</strong>　—　'
+        f'{html.escape(sm["purpose"])}</div>',
+    ])
+
+    cols = len(sm["slots"])
+    grid = f"grid-template-columns:minmax(130px,1fr) repeat({cols},minmax(160px,2fr)) 88px;"
+    parts.append('<div class="zeffo-scroll">')
+    head_cells = "".join(f"<span>{html.escape(s['label'])}</span>" for s in sm["slots"])
+    parts.append(f'<div class="zrow head" style="{grid}"><span>玩家</span>{head_cells}<span>狀態</span></div>')
+
+    def cell(st):
+        if st["passes"]:
+            rec = st["best_pass"]["rec"]
+            game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
+            omi = "、Omi ✓" if st["best_pass"]["candidate"].get("require_omicron") else ""
+            return f'<span class="zcell pass">R{game_r} ✓{omi}</span>'
+        if st["best_fail"]:
+            rec = st["best_fail"]["rec"]
+            game_r = max(0, rec["relic_tier"] - RELIC_OFFSET)
+            return f'<span class="zcell fail">R{game_r}（{html.escape(st["best_fail"]["reason"])}）</span>'
+        return '<span class="zcell miss">未擁有</span>'
+
+    for row in sm["partial"] + sm["qualified"]:
+        ok = row["passes"] == cols
+        cells = "".join(cell(st) for st in row["slot_status"])
+        status = ('<span class="zstatus ok">達標</span>' if ok
+                  else f'<span class="zstatus no">差 {cols - row["passes"]} 槽</span>')
+        parts.append(
+            f'<div class="zrow {"ok" if ok else "no"}" style="{grid}">'
+            f'<span class="pn">{html.escape(row["player"])}</span>{cells}{status}</div>')
+
+    parts.append("</div></div>")
+    return "".join(parts)
+
+
 def build_freshness(members):
     """Return list of (name, ally_code, last_updated_dt, age_hours) sorted by age desc."""
     out = []
@@ -805,11 +888,13 @@ def render(guild, rows, sms, active_claims, claim_index, members_count, freshnes
         '<div class="tabs">',
         '<button class="tab" data-tab="ops" onclick="showTab(\'ops\')">Operation 缺口</button>',
         '<button class="tab" data-tab="sm" onclick="showTab(\'sm\')">Special Mission</button>',
+        '<button class="tab" data-tab="zeffo" onclick="showTab(\'zeffo\')">Zeffo 小隊</button>',
         '<button class="tab" data-tab="fresh" onclick="showTab(\'fresh\')">資料新鮮度</button>',
         "</div>",
         render_claims_block(active_claims),
         render_ops_page(rows, claim_index),
         render_sm_page(sms),
+        render_zeffo_page(sms),
         render_freshness_page(freshness),
         '<footer>data: swgoh.gg API · generated by swgoh_TB</footer>',
         "</div></body></html>",
