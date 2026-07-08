@@ -287,70 +287,82 @@ def build_special_missions(special_missions, by_player):
 
 
 def build_unit_rows(requirements, owners, name_lookup):
-    """Return combined per-unit rows + per-op breakdown."""
-    by_key = {}
+    """Return per-pool unit rows. Ops in the same pool (= same phase) share the
+    unit pool so demand sums; different pools are independent battles with their
+    own relic thresholds (e.g. Zeffo P3 R7 vs Vandor/Kafrene P5 R9)."""
+    pools = {}
     for op in requirements["operations"]:
+        pool_name = op.get("pool", op["name"])
+        pool = pools.setdefault(pool_name, {
+            "pool": pool_name,
+            "char_min_relic": op["char_min_relic"],
+            "ship_min_rarity": op["ship_min_rarity"],
+            "by_key": {},
+        })
         for u in op["units"]:
             key = normalize(u["name"])
-            entry = by_key.setdefault(key, {
-                "key": key,
-                "name": u["name"],
-                "needed": 0,
-                "ops": [],
-                "char_min_relic": op["char_min_relic"],
-                "ship_min_rarity": op["ship_min_rarity"],
+            entry = pool["by_key"].setdefault(key, {
+                "key": key, "name": u["name"], "needed": 0, "ops": [],
             })
             entry["needed"] += u["count"]
             entry["ops"].append({"op": op["name"], "count": u["count"]})
-    rows = []
-    for entry in by_key.values():
-        recs = owners.get(entry["key"], [])
-        ct = recs[0]["combat_type"] if recs else 0
-        # Determine eligible
-        if ct == 2:
-            api_thr = entry["ship_min_rarity"]
-            metric_key = "rarity"
-            metric_label = "*"
-            display_threshold = entry["ship_min_rarity"]
-            display_offset = 0
-        else:
-            api_thr = entry["char_min_relic"] + RELIC_OFFSET
-            metric_key = "relic_tier"
-            metric_label = "R"
-            display_threshold = entry["char_min_relic"]
-            display_offset = RELIC_OFFSET
-        eligible = sum(1 for r in recs if r[metric_key] >= api_thr)
-        deficit = max(0, entry["needed"] - eligible)
 
-        # Sort owners: above threshold first by metric desc, then below by metric desc
-        owners_sorted = sorted(
-            recs,
-            key=lambda r: (-(1 if r[metric_key] >= api_thr else 0), -r[metric_key], -r["power"]),
-        )
-        owners_view = [{
-            "player": r["player"],
-            "metric": r[metric_key] - display_offset if ct != 2 else r[metric_key],
-            "ready": r[metric_key] >= api_thr,
-            "gear": r["gear_level"],
-            "rarity": r["rarity"],
-        } for r in owners_sorted]
+    out = []
+    for pool in pools.values():
+        rows = []
+        for entry in pool["by_key"].values():
+            recs = owners.get(entry["key"], [])
+            ct = recs[0]["combat_type"] if recs else 0
+            if ct == 2:
+                api_thr = pool["ship_min_rarity"]
+                metric_key = "rarity"
+                metric_label = "*"
+                display_threshold = pool["ship_min_rarity"]
+                display_offset = 0
+            else:
+                api_thr = pool["char_min_relic"] + RELIC_OFFSET
+                metric_key = "relic_tier"
+                metric_label = "R"
+                display_threshold = pool["char_min_relic"]
+                display_offset = RELIC_OFFSET
+            eligible = sum(1 for r in recs if r[metric_key] >= api_thr)
+            deficit = max(0, entry["needed"] - eligible)
 
-        rows.append({
-            "name": entry["name"],
-            "matched_name": name_lookup.get(entry["key"]),
-            "matched": entry["key"] in owners and len(owners[entry["key"]]) > 0,
-            "combat_type": ct,
-            "needed": entry["needed"],
-            "eligible": eligible,
-            "owners_total": len(recs),
-            "deficit": deficit,
-            "ops": entry["ops"],
-            "metric_label": metric_label,
-            "threshold": display_threshold,
-            "owners": owners_view,
+            # Sort owners: above threshold first by metric desc, then below by metric desc
+            owners_sorted = sorted(
+                recs,
+                key=lambda r: (-(1 if r[metric_key] >= api_thr else 0), -r[metric_key], -r["power"]),
+            )
+            owners_view = [{
+                "player": r["player"],
+                "metric": r[metric_key] - display_offset if ct != 2 else r[metric_key],
+                "ready": r[metric_key] >= api_thr,
+                "gear": r["gear_level"],
+                "rarity": r["rarity"],
+            } for r in owners_sorted]
+
+            rows.append({
+                "name": entry["name"],
+                "matched_name": name_lookup.get(entry["key"]),
+                "matched": entry["key"] in owners and len(owners[entry["key"]]) > 0,
+                "combat_type": ct,
+                "needed": entry["needed"],
+                "eligible": eligible,
+                "owners_total": len(recs),
+                "deficit": deficit,
+                "ops": entry["ops"],
+                "metric_label": metric_label,
+                "threshold": display_threshold,
+                "owners": owners_view,
+            })
+        rows.sort(key=lambda r: (-r["deficit"], -r["needed"], r["name"]))
+        out.append({
+            "pool": pool["pool"],
+            "char_min_relic": pool["char_min_relic"],
+            "ship_min_rarity": pool["ship_min_rarity"],
+            "rows": rows,
         })
-    rows.sort(key=lambda r: (-r["deficit"], -r["needed"], r["name"]))
-    return rows
+    return out
 
 
 CSS = """
@@ -547,12 +559,13 @@ def render_claims_block(active_claims):
     return "".join(parts)
 
 
-def render_ops_page(rows, claim_index=None):
+def render_ops_page(pools, claim_index=None):
     claim_index = claim_index or {}
-    total_need = sum(r["needed"] for r in rows)
-    total_deficit = sum(r["deficit"] for r in rows)
+    all_rows = [r for p in pools for r in p["rows"]]
+    total_need = sum(r["needed"] for r in all_rows)
+    total_deficit = sum(r["deficit"] for r in all_rows)
     total_filled = total_need - total_deficit
-    short_units = sum(1 for r in rows if r["deficit"] > 0)
+    short_units = sum(1 for r in all_rows if r["deficit"] > 0)
 
     parts = ['<div id="page-ops" class="page">']
     parts.extend([
@@ -566,8 +579,24 @@ def render_ops_page(rows, claim_index=None):
         '<input id="search" placeholder="搜尋角色名稱…">',
         '<button id="only-short" class="active" onclick="toggleOnlyShort(this)">只看缺口</button>',
         "</div>",
-        "<section><h2>角色缺口（同 phase 共池視角）</h2>",
     ])
+    for pool in pools:
+        pool_deficit = sum(r["deficit"] for r in pool["rows"])
+        pool_need = sum(r["needed"] for r in pool["rows"])
+        tag = f"缺 {pool_deficit}" if pool_deficit else "全滿 ✓"
+        parts.append(
+            f'<section><h2>{html.escape(pool["pool"])}'
+            f'（角色 R{pool["char_min_relic"]}+／艦船 {pool["ship_min_rarity"]}★+）'
+            f'　<span style="font-size:13px;color:{"#fbbf24" if pool_deficit else "#4ade80"}">'
+            f'{pool_need} 槽 · {tag}</span></h2>')
+        parts.append(_render_unit_list(pool["rows"], claim_index))
+        parts.append("</section>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def _render_unit_list(rows, claim_index):
+    parts = []
     for r in rows:
         ct_class = "char" if r["combat_type"] == 1 else "ship"
         ct_label = "char" if r["combat_type"] == 1 else "ship"
@@ -605,7 +634,6 @@ def render_ops_page(rows, claim_index=None):
             f'<div class="owners-grid">{owners_block}</div>',
             "</div></div>",
         ])
-    parts.append("</section></div>")
     return "".join(parts)
 
 
@@ -997,9 +1025,13 @@ def main():
     OUT_PATH.write_text(html_text, encoding="utf-8")
     size_kb = OUT_PATH.stat().st_size / 1024
     print(f"[wrote] {OUT_PATH} ({size_kb:.1f} KB)")
-    print(f"[stats] {len(rows)} op-units · need={sum(r['needed'] for r in rows)} "
-          f"short={sum(r['deficit'] for r in rows)} · "
+    all_rows = [r for p in rows for r in p["rows"]]
+    print(f"[stats] {len(all_rows)} op-units · need={sum(r['needed'] for r in all_rows)} "
+          f"short={sum(r['deficit'] for r in all_rows)} · "
           f"{len(sms)} special mission(s)")
+    for p in rows:
+        print(f"  - pool {p['pool']}: need={sum(r['needed'] for r in p['rows'])} "
+              f"short={sum(r['deficit'] for r in p['rows'])}")
     for sm in sms:
         print(f"  - {sm['name']}: {len(sm['qualified'])}/{sm['needed']} qualified players")
 

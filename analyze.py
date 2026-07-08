@@ -119,6 +119,7 @@ def analyze(requirements: dict, owners: dict, name_lookup: dict, members_count: 
             })
         results.append({
             "name": op["name"],
+            "pool": op.get("pool", op["name"]),
             "char_min_relic": op["char_min_relic"],
             "ship_min_rarity": op["ship_min_rarity"],
             "rows": op_rows,
@@ -139,10 +140,12 @@ def fmt_row(r: dict) -> str:
     return f"  {name:<32s} {ct_label}  need {r['needed']:>2d}  have {r['eligible']:>2d}/{r['owners_total']:>2d}  {deficit_str}{flag}"
 
 
-def combined_view(report: dict) -> list:
-    """Aggregate demand per unit across all operations (same-phase pool sharing)."""
-    by_key = {}
+def combined_view(report: dict) -> dict:
+    """Aggregate demand per unit within each pool (= phase). Different pools are
+    independent battles — a unit can deploy once per pool, so no cross-pool sum."""
+    pools = {}
     for op in report["operations"]:
+        by_key = pools.setdefault(op.get("pool", op["name"]), {})
         for r in op["rows"]:
             k = r["required_name"]
             entry = by_key.setdefault(k, {
@@ -157,10 +160,13 @@ def combined_view(report: dict) -> list:
             })
             entry["needed"] += r["needed"]
             entry["ops"].append(f"{op['name']}×{r['needed']}")
-    rows = list(by_key.values())
-    for r in rows:
-        r["deficit"] = max(0, r["needed"] - r["eligible"])
-    return rows
+    out = {}
+    for pool, by_key in pools.items():
+        rows = list(by_key.values())
+        for r in rows:
+            r["deficit"] = max(0, r["needed"] - r["eligible"])
+        out[pool] = rows
+    return out
 
 
 def print_report(report: dict):
@@ -187,19 +193,15 @@ def print_report(report: dict):
     print(f"PER-OP TOTAL  needed={grand_needed}  filled={grand_eligible}  short={grand_deficit}")
     print("(per-op view ignores shared-pool conflicts — see combined view below)")
 
-    # Combined view: aggregate demand per unit across operations
-    combined = combined_view(report)
-    combined_short = [r for r in combined if r["deficit"] > 0]
-    combined_short.sort(key=lambda r: (-r["deficit"], -r["needed"], r["name"]))
-
-    print(f"\n{'='*60}")
-    print("COMBINED DEMAND (same-phase pool — each unit can only deploy once)")
-    print(f"Units with deficit: {len(combined_short)}")
-    total_short = sum(r["deficit"] for r in combined_short)
-    total_need = sum(r["needed"] for r in combined)
-    print(f"Aggregate slots needed: {total_need}  |  TRUE SHORT: {total_short}\n")
-
-    if combined_short:
+    # Combined view: aggregate demand per unit within each pool (phase)
+    for pool, rows in combined_view(report).items():
+        combined_short = [r for r in rows if r["deficit"] > 0]
+        combined_short.sort(key=lambda r: (-r["deficit"], -r["needed"], r["name"]))
+        total_short = sum(r["deficit"] for r in combined_short)
+        total_need = sum(r["needed"] for r in rows)
+        print(f"\n{'='*60}")
+        print(f"COMBINED DEMAND — pool: {pool} (each unit deploys once per pool)")
+        print(f"Aggregate slots needed: {total_need}  |  TRUE SHORT: {total_short}  |  units short: {len(combined_short)}\n")
         for r in combined_short:
             ct = "char" if r["combat_type"] == 1 else "ship" if r["combat_type"] == 2 else "?"
             ops = " + ".join(r["ops"])
@@ -228,21 +230,22 @@ def write_markdown(report: dict, out_path: Path):
     lines.append(f"\n**PER-OP TOTAL — needed {grand_needed}, short {grand_deficit}**")
     lines.append("\n_(per-op view ignores shared-pool conflicts)_\n")
 
-    # Combined view
-    combined = combined_view(report)
-    combined_short = [r for r in combined if r["deficit"] > 0]
-    combined_short.sort(key=lambda r: (-r["deficit"], -r["needed"], r["name"]))
-    total_short = sum(r["deficit"] for r in combined_short)
-    total_need = sum(r["needed"] for r in combined)
-    lines.append("## Combined Demand (same-phase pool)\n")
-    lines.append(f"Aggregate need: {total_need}  |  **TRUE SHORT: {total_short}**\n")
-    if combined_short:
-        lines.append("| Unit | Type | Total Need | Have R9+ | Owners | Short | Ops |")
-        lines.append("|---|---|---:|---:|---:|---:|---|")
-        for r in combined_short:
-            ct = "char" if r["combat_type"] == 1 else "ship" if r["combat_type"] == 2 else "?"
-            ops = " + ".join(r["ops"])
-            lines.append(f"| {r['name']} | {ct} | {r['needed']} | {r['eligible']} | {r['owners_total']} | **{r['deficit']}** | {ops} |")
+    # Combined view (per pool)
+    for pool, rows in combined_view(report).items():
+        combined_short = [r for r in rows if r["deficit"] > 0]
+        combined_short.sort(key=lambda r: (-r["deficit"], -r["needed"], r["name"]))
+        total_short = sum(r["deficit"] for r in combined_short)
+        total_need = sum(r["needed"] for r in rows)
+        lines.append(f"## Combined Demand — pool: {pool}\n")
+        lines.append(f"Aggregate need: {total_need}  |  **TRUE SHORT: {total_short}**\n")
+        if combined_short:
+            lines.append("| Unit | Type | Total Need | Have | Owners | Short | Ops |")
+            lines.append("|---|---|---:|---:|---:|---:|---|")
+            for r in combined_short:
+                ct = "char" if r["combat_type"] == 1 else "ship" if r["combat_type"] == 2 else "?"
+                ops = " + ".join(r["ops"])
+                lines.append(f"| {r['name']} | {ct} | {r['needed']} | {r['eligible']} | {r['owners_total']} | **{r['deficit']}** | {ops} |")
+            lines.append("")
     out_path.write_text("\n".join(lines), encoding="utf-8")
     print(f"\n[markdown report written to {out_path}]")
 
