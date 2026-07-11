@@ -12,3 +12,16 @@ operations:
 
 # Cache lifetime in hours; re-fetch player rosters when older
 cache_ttl_hours: 6
+
+# Guild accounts controlled by the same person (reliable donors).
+# Flagged green in the 部署責任 tab; excluded when computing true external single-points.
+owner_accounts:
+  "821259719": Nelsonho
+  "918225312": PengAndy
+  "991266469": Kenshincs
+  "378212742": Goodnew
+
+# Operations shown in the 部署責任 (deployment responsibility) tab
+deployment_risk_ops:
+  - Kafrene
+  - Zeffo

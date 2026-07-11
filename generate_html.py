@@ -44,6 +44,13 @@ def load_data():
     return guild, requirements
 
 
+def load_config():
+    cfg_path = ROOT / "config.yaml"
+    if not cfg_path.exists():
+        return {}
+    return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+
+
 def _load_name_table(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -504,6 +511,37 @@ footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #1e293b;
 .zstatus { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px; text-align: center; }
 .zstatus.ok { background: #14532d; color: #bbf7d0; }
 .zstatus.no { background: #78350f; color: #fed7aa; }
+.dep-note { font-size: 12px; color: #94a3b8; background: #1e293b; border-radius: 8px;
+            padding: 10px 14px; margin-bottom: 16px; line-height: 1.7; }
+.dep-note .k { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+               font-weight: 700; margin: 0 2px; }
+.dep-sec h2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dep-sec .cnt { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; }
+.dep-sec .cnt.red { background: #7f1d1d; color: #fecaca; }
+.dep-sec .cnt.grn { background: #14532d; color: #bbf7d0; }
+.dep-sec .cnt.amb { background: #78350f; color: #fde68a; }
+.drow { background: #1e293b; border-radius: 10px; padding: 10px 14px; margin-bottom: 8px;
+        border-left: 4px solid #475569; }
+.drow.gap { border-left-color: #ef4444; }
+.drow.selfhold { border-left-color: #22c55e; }
+.drow.tight { border-left-color: #fbbf24; }
+.drow.watch { border-left-color: #64748b; }
+.drow-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.drow-name { font-weight: 700; font-size: 14px; }
+.drow-tag { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 999px; }
+.drow.gap .drow-tag { background: #7f1d1d; color: #fecaca; }
+.drow.selfhold .drow-tag { background: #14532d; color: #bbf7d0; }
+.drow.tight .drow-tag { background: #78350f; color: #fde68a; }
+.drow.watch .drow-tag { background: #334155; color: #cbd5e1; }
+.drow-need { font-size: 12px; color: #94a3b8; }
+.dchips { display: flex; flex-wrap: wrap; gap: 5px; }
+.dchip { font-size: 12px; padding: 3px 10px; border-radius: 999px; display: inline-flex;
+         align-items: center; gap: 5px; }
+.dchip.user { background: #14532d; color: #bbf7d0; font-weight: 700; }
+.dchip.ext { background: #334155; color: #cbd5e1; }
+.dchip .mt { font-size: 10px; opacity: 0.75; }
+.dchip.none { background: transparent; color: #64748b; font-style: italic; }
+.dep-ok-note { font-size: 12px; color: #64748b; margin: 6px 0 20px; }
 """
 
 JS = """
@@ -887,6 +925,130 @@ def render_zeffo_page(zeffo):
     return "".join(parts)
 
 
+def build_deployment_risk(by_player, requirements, owner_accounts, target_ops):
+    """For selected operations, classify each required unit by supply risk, flagging
+    the user's own accounts (owner_accounts) as reliable donors.
+
+    Tiers (per unit):
+      gap       — qualified holders < needed (real deficit)
+      selfhold  — external holders alone < needed, user accounts cover the shortfall
+                  (guild depends on the user here — reliable IF they remember to donate)
+      tight     — holders exactly == needed, no user backup (external zero-margin)
+      watch     — 1–2 spare beyond needed
+      ok        — comfortable (hidden from the focused view)
+    """
+    owner_set = {str(a) for a in (owner_accounts or {})}
+    order = {"gap": 0, "selfhold": 1, "tight": 2, "watch": 3, "ok": 4}
+    sections = []
+    for op in requirements["operations"]:
+        if op["name"] not in target_ops:
+            continue
+        char_thr = op["char_min_relic"] + RELIC_OFFSET
+        ship_thr = op["ship_min_rarity"]
+        rows = []
+        for u in op["units"]:
+            key = normalize(u["name"])
+            need = u["count"]
+            holders = []
+            for ally, p in by_player.items():
+                rec = p["roster"].get(key)
+                if not rec:
+                    continue
+                ct = rec.get("combat_type") or 0
+                if ct == 2:
+                    if (rec.get("rarity") or 0) >= ship_thr:
+                        holders.append({"player": rec["player"], "label": f"{rec.get('rarity') or 0}★",
+                                        "user": str(ally) in owner_set})
+                elif (rec.get("relic_tier") or 0) >= char_thr:
+                    holders.append({"player": rec["player"],
+                                    "label": f"R{max(0, (rec.get('relic_tier') or 0) - RELIC_OFFSET)}",
+                                    "user": str(ally) in owner_set})
+            n_user = sum(1 for h in holders if h["user"])
+            n_ext = len(holders) - n_user
+            if len(holders) < need:
+                tier = "gap"
+            elif n_ext < need:
+                tier = "selfhold"
+            elif len(holders) == need:
+                tier = "tight"
+            elif len(holders) - need <= 2:
+                tier = "watch"
+            else:
+                tier = "ok"
+            holders.sort(key=lambda h: (not h["user"], h["player"].lower()))
+            rows.append({"name": u["name"], "need": need, "holders": holders,
+                         "n_user": n_user, "n_ext": n_ext, "tier": tier})
+        rows.sort(key=lambda r: (order[r["tier"]], len(r["holders"]), -r["need"]))
+        sections.append({
+            "name": op["name"],
+            "char_min_relic": op["char_min_relic"],
+            "ship_min_rarity": op["ship_min_rarity"],
+            "rows": rows,
+        })
+    return {"sections": sections}
+
+
+def render_deploy_page(deploy):
+    parts = ['<div class="page" id="page-deploy">']
+    if not deploy or not deploy["sections"]:
+        parts.append('<p style="color:#94a3b8">未設定 deployment_risk_ops，或找不到對應行動。</p></div>')
+        return "".join(parts)
+
+    parts.append(
+        '<div class="dep-note">開打前照這頁點名。'
+        '<span class="k dchip user" style="padding:1px 8px">綠 = 你的帳號</span>（記得上就穩）　'
+        '<span class="k dchip ext" style="padding:1px 8px">灰 = 外部隊友</span>（要提醒）<br>'
+        '🔴 <b>缺口</b>＝合格人數不足；🟢 <b>你獨扛</b>＝扣掉你就不夠、全靠你補；'
+        '🟡 <b>外部零餘裕</b>＝剛好夠、缺一人就開洞（重點盯外部）；⚪ <b>吃緊</b>＝僅 1–2 人餘裕。'
+        '供給充足者已略去。</div>')
+
+    tier_label = {"gap": "🔴 缺口", "selfhold": "🟢 你獨扛",
+                  "tight": "🟡 外部零餘裕", "watch": "⚪ 吃緊"}
+    for sec in deploy["sections"]:
+        shown = [r for r in sec["rows"] if r["tier"] != "ok"]
+        ok_n = len(sec["rows"]) - len(shown)
+        n_gap = sum(1 for r in shown if r["tier"] == "gap")
+        n_self = sum(1 for r in shown if r["tier"] == "selfhold")
+        n_tight = sum(1 for r in shown if r["tier"] == "tight")
+        cnt_html = []
+        if n_gap:
+            cnt_html.append(f'<span class="cnt red">缺口 {n_gap}</span>')
+        if n_self:
+            cnt_html.append(f'<span class="cnt grn">你獨扛 {n_self}</span>')
+        if n_tight:
+            cnt_html.append(f'<span class="cnt amb">外部單點 {n_tight}</span>')
+        parts.append('<section class="dep-sec">')
+        parts.append(
+            f'<h2>{html.escape(sec["name"])}'
+            f'<span style="font-size:13px;color:#94a3b8;font-weight:400">'
+            f'（角色 R{sec["char_min_relic"]}+／艦 {sec["ship_min_rarity"]}★+）</span>'
+            f'{"".join(cnt_html)}</h2>')
+        for r in shown:
+            chips = "".join(
+                f'<span class="dchip {"user" if h["user"] else "ext"}">'
+                f'{html.escape(h["player"])}<span class="mt">{h["label"]}</span></span>'
+                for h in r["holders"])
+            if not chips:
+                chips = '<span class="dchip none">目前無人達標</span>'
+            short = r["need"] - len(r["holders"])
+            need_txt = f'需 {r["need"]}　有 {len(r["holders"])}'
+            if short > 0:
+                need_txt += f'　<span style="color:#f87171">缺 {short}</span>'
+            parts.append(
+                f'<div class="drow {r["tier"]}">'
+                f'<div class="drow-head">'
+                f'<span class="drow-name">{html.escape(r["name"])}</span>'
+                f'<span class="drow-tag">{tier_label[r["tier"]]}</span>'
+                f'<span class="drow-need">{need_txt}</span></div>'
+                f'<div class="dchips">{chips}</div></div>')
+        if ok_n:
+            parts.append(f'<div class="dep-ok-note">其餘 {ok_n} 種單位供給充足，未列出。</div>')
+        parts.append('</section>')
+
+    parts.append("</div>")
+    return "".join(parts)
+
+
 def build_freshness(members):
     """Return list of (name, ally_code, last_updated_dt, age_hours) sorted by age desc."""
     out = []
@@ -952,7 +1114,7 @@ def render_freshness_page(freshness):
     return "".join(parts)
 
 
-def render(guild, rows, sms, zeffo, active_claims, claim_index, members_count, freshness):
+def render(guild, rows, sms, zeffo, deploy, active_claims, claim_index, members_count, freshness):
     now = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M %Z")
     parts = [
         "<!DOCTYPE html>",
@@ -972,12 +1134,14 @@ def render(guild, rows, sms, zeffo, active_claims, claim_index, members_count, f
         '<button class="tab" data-tab="ops" onclick="showTab(\'ops\')">Operation 缺口</button>',
         '<button class="tab" data-tab="sm" onclick="showTab(\'sm\')">Special Mission</button>',
         '<button class="tab" data-tab="zeffo" onclick="showTab(\'zeffo\')">Zeffo 小隊</button>',
+        '<button class="tab" data-tab="deploy" onclick="showTab(\'deploy\')">部署責任</button>',
         '<button class="tab" data-tab="fresh" onclick="showTab(\'fresh\')">資料新鮮度</button>',
         "</div>",
         render_claims_block(active_claims),
         render_ops_page(rows, claim_index),
         render_sm_page(sms),
         render_zeffo_page(zeffo),
+        render_deploy_page(deploy),
         render_freshness_page(freshness),
         '<footer>data: swgoh.gg API · generated by swgoh_TB</footer>',
         "</div></body></html>",
@@ -1015,11 +1179,15 @@ def main():
     zeffo = build_zeffo_planet(members, requirements.get("zeffo_missions"), units_meta)
     if zeffo:
         print(f"[zeffo] full-clear-ready: {zeffo['full']}/{len(zeffo['rows'])}")
+    cfg = load_config()
+    deploy = build_deployment_risk(by_player, requirements,
+                                   cfg.get("owner_accounts"),
+                                   set(cfg.get("deployment_risk_ops") or []))
     freshness = build_freshness(members)
     stale_n = sum(1 for r in freshness if r[3] > 48)
     if stale_n:
         print(f"[freshness] {stale_n} player(s) >48h stale on swgoh.gg")
-    html_text = render(guild, rows, sms, zeffo, active_claims, claim_index,
+    html_text = render(guild, rows, sms, zeffo, deploy, active_claims, claim_index,
                        members_count=len(members), freshness=freshness)
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(html_text, encoding="utf-8")
