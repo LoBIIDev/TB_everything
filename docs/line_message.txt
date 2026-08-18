@@ -1,5 +1,5 @@
 【Legend of Bahamut II】Vandor + Kafrene Operation 缺口
-更新：2026-08-18　|　總缺口 14 隻 R9 角色
+更新：2026-08-18　|　總缺口 15 隻 R9 角色
 
 ▍缺 3（1 隻角色）
 ・CLS -3
@@ -9,11 +9,12 @@
 ・丘巴卡 -2
 ・葉問 -2
 
-▍缺 1（5 隻角色）
+▍缺 1（6 隻角色）
 ・黑路 -1
 ・白瑞 -1
 ・C3PO -1
 ・Jedi Knight Guardian -1
 ・Luke Skywalker (Farmboy) -1
+・札爾巴 -1
 
 📊 詳細：https://lobiidev.github.io/TB_everything/
